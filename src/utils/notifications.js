@@ -1,12 +1,12 @@
-const twilio = require('twilio');
+import twilio from "twilio";
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const fromPhone = process.env.TWILIO_PHONE_NUMBER;
 
-const client = (accountSid && authToken) ? twilio(accountSid, authToken) : null;
+const client = accountSid && authToken ? twilio(accountSid, authToken) : null;
 
-async function sendSMSNotification(toPhoneNumber, message) {
+export async function sendSMSNotification(toPhoneNumber, message) {
   if (!client || !toPhoneNumber || !fromPhone) {
     console.log(`[SMS Mock] To ${toPhoneNumber}: ${message}`);
     return;
@@ -16,12 +16,10 @@ async function sendSMSNotification(toPhoneNumber, message) {
     await client.messages.create({
       body: message,
       from: fromPhone,
-      to: toPhoneNumber
+      to: toPhoneNumber,
     });
     console.log(`SMS successfully sent to ${toPhoneNumber}`);
   } catch (error) {
-    console.error('Twilio Error:', error.message);
+    console.error("Twilio Error:", error.message);
   }
 }
-
-module.exports = { sendSMSNotification };

@@ -1,9 +1,14 @@
 import mongoose from "mongoose";
 
 const queueEntrySchema = new mongoose.Schema({
-  shopId: {
+  shop: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Shop",
+    required: true,
+  },
+  customer: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
     required: true,
   },
   customerName: {
@@ -16,13 +21,17 @@ const queueEntrySchema = new mongoose.Schema({
     trim: true,
     default: "",
   },
-  tokenNumber: {
+  token: {
     type: Number,
     required: true,
   },
+  estimatedWait: {
+    type: Number,
+    default: 0,
+  },
   status: {
     type: String,
-    enum: ["waiting", "serving", "served", "cancelled"],
+    enum: ["waiting", "serving", "completed", "cancelled"],
     default: "waiting",
   },
   notifiedPosition3: {

@@ -25,8 +25,8 @@ export default function Customer() {
 
     const fetchStatus = async () => {
       try {
-        const res = await api.get(`/queue/status/${activeToken._id}`);
-        setEtaDetails(res.data);
+        const data = await api.get(`/queue/status/${activeToken._id}`);
+        setEtaDetails(data);
       } catch (err) {
         console.error("Error fetching token status:", err);
       }
@@ -40,14 +40,14 @@ export default function Customer() {
   const handleJoin = async (e) => {
     e.preventDefault();
     try {
-      const res = await api.post("/queue/join", {
+      const data = await api.post("/queue/join", {
         shopId,
         customerName: name,
         customerPhone: phone,
       });
-      setActiveToken(res.data);
+      setActiveToken(data);
     } catch (err) {
-      alert("Failed to join queue");
+      alert(err.message || "Failed to join queue");
     }
   };
 
@@ -106,7 +106,7 @@ export default function Customer() {
             Your Token
           </span>
           <h1 className="text-5xl font-extrabold text-indigo-600">
-            #{activeToken.tokenNumber}
+            #{activeToken.token}
           </h1>
 
           {etaDetails && (
