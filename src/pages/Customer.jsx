@@ -1,24 +1,132 @@
-import { useMemo, useState } from 'react';
-import toast from 'react-hot-toast';
-import { QRCodeSVG } from 'qrcode.react';
-import { FiClock, FiSearch, FiMapPin, FiX, FiLogOut, FiGrid, FiCopy } from 'react-icons/fi';
-import { useQueue } from '../context/QueueContext';
-import { useAuth } from '../context/AuthContext';
+import React, { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
+import { api } from "../lib/api";
 
 export default function Customer() {
-  const { shops, entries, join, advance } = useQueue(); const { user } = useAuth();
-  const [query, setQuery] = useState(''); const [category, setCategory] = useState('All'); const [showQr, setShowQr] = useState(null);
-  const active = entries.filter(e => e.userId === user.id && ['waiting', 'serving'].includes(e.status));
-  const history = entries.filter(e => e.userId === user.id && ['completed', 'cancelled'].includes(e.status));
-  const categories = ['All', ...new Set(shops.map(shop => shop.category))];
-  const visible = useMemo(() => shops.filter(shop => shop.isOpen && (category === 'All' || shop.category === category) && `${shop.name} ${shop.category} ${shop.address}`.toLowerCase().includes(query.toLowerCase())), [shops, query, category]);
-  const handleJoin = shop => { try { const entry = join(shop, user); toast.success(`You’re in! Your token is #${entry.token}`); if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch (error) { toast.error(error.message); } };
-  const leave = entry => { if (window.confirm(`Leave the queue at ${shops.find(s => s.id === entry.shopId)?.name}?`)) { advance(entry.id, 'cancelled'); toast.success('You have left the queue'); } };
-  const copyToken = async entry => { await navigator.clipboard.writeText(`QueueLess token #${entry.token}`); toast.success('Token copied'); };
-  return <div className="dashboard"><div className="dash-head"><div><div className="eyebrow">CUSTOMER DASHBOARD</div><h1>Hello, {user.name.split(' ')[0]}.</h1><p>Your time, beautifully managed.</p></div><button className="notify" onClick={() => 'Notification' in window && Notification.requestPermission()}>Enable alerts</button></div>
-    {active.length > 0 && <section className="my-queue"><div className="queue-label">YOUR ACTIVE TOKEN</div>{active.map(entry => { const shop = shops.find(s => s.id === entry.shopId); return <div className="token" key={entry.id}><div><span className="token-num">#{String(entry.token).padStart(2, '0')}</span><h2>{shop?.name}</h2><p><FiMapPin/> {shop?.address}</p></div><div className="token-right"><strong>{entry.status === 'serving' ? 'It’s your turn' : `~${entry.estimatedWait} min`}</strong><span>{entry.status === 'serving' ? 'Please head over' : 'Estimated wait'}</span><div className="token-actions"><button className="qr-button" onClick={() => setShowQr(entry)}><FiGrid/> Show QR</button><button className="leave-button" onClick={() => leave(entry)}><FiLogOut/> Leave queue</button></div></div></div>; })}</section>}
-    <section><div className="browse-head"><div><h2>Find a queue</h2><p>Choose a nearby business and join in seconds.</p></div><div className="search"><FiSearch/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search shops or categories"/></div></div><div className="filter-row">{categories.map(item => <button className={category === item ? 'active' : ''} key={item} onClick={() => setCategory(item)}>{item}</button>)}</div><div className="shop-grid dashboard-grid">{visible.map(shop => <article className="shop-card" key={shop.id}><div className="status"><i/> Open</div><div className="shop-icon">{shop.name[0]}</div><h3>{shop.name}</h3><p>{shop.category} · {shop.address}</p><div className="shop-meta"><span><FiClock/> ~{shop.wait} min</span><span>{shop.active} waiting</span></div><button className="button full" onClick={() => handleJoin(shop)}>Join queue</button></article>)}</div>{!visible.length && <div className="no-line">No open queues match your search.</div>}</section>
-    {history.length > 0 && <section className="history-panel"><div><h2>Queue history</h2><p>Your most recent visits.</p></div>{history.slice(0, 4).map(entry => <div className="history-row" key={entry.id}><span>#{String(entry.token).padStart(2, '0')}</span><strong>{shops.find(s => s.id === entry.shopId)?.name || 'QueueLess shop'}</strong><small>{entry.status === 'completed' ? 'Completed' : 'Cancelled'}</small></div>)}</section>}
-    {showQr && <div className="modal-backdrop" onClick={() => setShowQr(null)}><div className="modal" onClick={e => e.stopPropagation()}><button className="close" onClick={() => setShowQr(null)}><FiX/></button><h2>Your QueueLess pass</h2><p>Show this at {shops.find(s => s.id === showQr.shopId)?.name}</p><QRCodeSVG value={JSON.stringify({ token: showQr.token, shopId: showQr.shopId, entryId: showQr.id })} size={190}/><strong>Token #{showQr.token}</strong><button className="copy-token" onClick={() => copyToken(showQr)}><FiCopy/> Copy token</button></div></div>}
-  </div>;
+  const [searchParams] = useSearchParams();
+  const shopIdFromUrl = searchParams.get("shopId");
+
+  const [shopId, setShopId] = useState(shopIdFromUrl || "");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [activeToken, setActiveToken] = useState(null);
+  const [etaDetails, setEtaDetails] = useState(null);
+
+  // Auto-fill shop ID if opened via QR Code scan
+  useEffect(() => {
+    if (shopIdFromUrl) {
+      setShopId(shopIdFromUrl);
+    }
+  }, [shopIdFromUrl]);
+
+  // Poll active token details & ETA
+  useEffect(() => {
+    if (!activeToken?._id) return;
+
+    const fetchStatus = async () => {
+      try {
+        const res = await api.get(`/queue/status/${activeToken._id}`);
+        setEtaDetails(res.data);
+      } catch (err) {
+        console.error("Error fetching token status:", err);
+      }
+    };
+
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000); // Poll every 5s
+    return () => clearInterval(interval);
+  }, [activeToken]);
+
+  const handleJoin = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await api.post("/queue/join", {
+        shopId,
+        customerName: name,
+        customerPhone: phone,
+      });
+      setActiveToken(res.data);
+    } catch (err) {
+      alert("Failed to join queue");
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto p-4">
+      {!activeToken ? (
+        <form
+          onSubmit={handleJoin}
+          className="bg-white p-6 rounded-xl shadow space-y-4"
+        >
+          <h2 className="text-xl font-bold">Join Queue</h2>
+          {!shopIdFromUrl && (
+            <div>
+              <label className="block text-sm font-medium mb-1">Shop ID</label>
+              <input
+                type="text"
+                value={shopId}
+                onChange={(e) => setShopId(e.target.value)}
+                required
+                className="w-full border rounded p-2"
+              />
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium mb-1">Your Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              className="w-full border rounded p-2"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Phone Number (for SMS updates)
+            </label>
+            <input
+              type="tel"
+              placeholder="+1234567890"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="w-full border rounded p-2"
+            />
+          </div>
+          <button
+            type="submit"
+            className="w-full bg-indigo-600 text-white py-2 rounded font-semibold"
+          >
+            Get Token
+          </button>
+        </form>
+      ) : (
+        <div className="bg-white p-6 rounded-xl shadow text-center space-y-4">
+          <span className="text-xs uppercase bg-indigo-100 text-indigo-700 font-bold px-2.5 py-1 rounded-full">
+            Your Token
+          </span>
+          <h1 className="text-5xl font-extrabold text-indigo-600">
+            #{activeToken.tokenNumber}
+          </h1>
+
+          {etaDetails && (
+            <div className="grid grid-cols-2 gap-4 mt-6 pt-6 border-t text-left">
+              <div className="bg-gray-50 p-3 rounded">
+                <p className="text-xs text-gray-500">People Ahead</p>
+                <p className="text-lg font-bold text-gray-800">
+                  {etaDetails.aheadCount}
+                </p>
+              </div>
+              <div className="bg-gray-50 p-3 rounded">
+                <p className="text-xs text-gray-500">Estimated Wait</p>
+                <p className="text-lg font-bold text-indigo-600">
+                  ~{etaDetails.estimatedWaitMinutes} mins
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

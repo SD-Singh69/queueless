@@ -1,78 +1,143 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import dotenv from "dotenv";
-import express from "express";
-import mongoose from "mongoose";
-import cors from "cors";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
-import morgan from "morgan";
-import { Server } from "socket.io";
-import { createServer } from "node:http";
-import authRoutes from "./routes/auth.js";
-import shopRoutes from "./routes/shops.js";
-import queueRoutes from "./routes/queue.js";
-import { requireAuthConfig, requireDatabase } from "./middleware/database.js";
-import { sanitizeRequest } from "./middleware/sanitize.js";
+const express = require("express");
+const router = express.Router();
+const QueueEntry = require("../models/QueueEntry");
+const { sendSMSNotification } = require("../utils/notifications");
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
-dotenv.config();
-const app = express();
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: { origin: process.env.CLIENT_URL || "http://localhost:5173" },
-});
-app.set("io", io);
-app.use(helmet());
-app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:5173" }));
-app.use(express.json({ limit: "20kb" }));
-app.use(sanitizeRequest);
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
-app.use(morgan("dev"));
-app.get("/api/health", (_, res) =>
-  res.json({
-    status: "ok",
-    database:
-      mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-    authConfigured: Boolean(
-      process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32,
-    ),
-  }),
-);
-app.use("/api/auth", requireAuthConfig, requireDatabase, authRoutes);
-app.use("/api/shops", requireAuthConfig, requireDatabase, shopRoutes);
-app.use("/api/queue", requireAuthConfig, requireDatabase, queueRoutes);
-app.use((err, req, res, _next) => {
-  console.error(err);
-  res.status(err.status || 500).json({
-    message: err.message || "Something went wrong. Please try again.",
-  });
-});
-io.on("connection", (socket) =>
-  socket.on("shop:watch", (shopId) => socket.join(`shop:${shopId}`)),
-);
-const PORT = process.env.PORT || 5000;
+// Helper: Calculate average service duration in minutes based on last 20 served tokens
+async function calculateAverageServiceTime(shopId) {
+  const completedEntries = await QueueEntry.find({
+    shopId,
+    status: "served",
+    servedAt: { $exists: true },
+    createdAt: { $exists: true },
+  })
+    .sort({ servedAt: -1 })
+    .limit(20);
 
-async function startServer() {
-  try {
-    if (process.env.MONGODB_URI) {
-      await mongoose.connect(process.env.MONGODB_URI, {
-        serverSelectionTimeoutMS: 8000,
-      });
-      console.log("MongoDB connected");
-    } else {
-      console.warn("MONGODB_URI is not configured.");
+  if (!completedEntries.length) return 5; // Default 5 mins fallback
+
+  const totalDurationMs = completedEntries.reduce((acc, entry) => {
+    return acc + (new Date(entry.servedAt) - new Date(entry.createdAt));
+  }, 0);
+
+  const avgMinutes = totalDurationMs / completedEntries.length / (1000 * 60);
+  return Math.max(1, Math.round(avgMinutes));
+}
+
+// Helper: Check position changes & send SMS alerts
+async function processQueueAlerts(shopId) {
+  const waitingTokens = await QueueEntry.find({
+    shopId,
+    status: "waiting",
+  }).sort({ createdAt: 1 });
+
+  for (let index = 0; index < waitingTokens.length; index++) {
+    const entry = waitingTokens[index];
+    const position = index + 1;
+
+    // Alert when 3rd in line
+    if (position === 3 && !entry.notifiedPosition3) {
+      if (entry.customerPhone) {
+        await sendSMSNotification(
+          entry.customerPhone,
+          `Queueless Update: You are now #3 in line! Please prepare to head towards the counter.`,
+        );
+      }
+      entry.notifiedPosition3 = true;
+      await entry.save();
     }
 
-    httpServer.listen(PORT, "0.0.0.0", () => {
-      console.log(`QueueLess API running on port ${PORT}`);
-    });
-  } catch (err) {
-    console.error("Startup failed:", err);
-    process.exit(1);
+    // Alert when 1st in line / next up
+    if (position === 1 && !entry.notifiedTurn) {
+      if (entry.customerPhone) {
+        await sendSMSNotification(
+          entry.customerPhone,
+          `Queueless Update: You are next in line! Please step up to the counter.`,
+        );
+      }
+      entry.notifiedTurn = true;
+      await entry.save();
+    }
   }
 }
 
-startServer();
+// GET: Get Token Status + Dynamic ETA
+router.get("/status/:tokenId", async (req, res) => {
+  try {
+    const token = await QueueEntry.findById(req.params.tokenId);
+    if (!token) return res.status(404).json({ message: "Token not found" });
+
+    const aheadCount = await QueueEntry.countDocuments({
+      shopId: token.shopId,
+      status: "waiting",
+      createdAt: { $lt: token.createdAt },
+    });
+
+    const avgServiceTime = await calculateAverageServiceTime(token.shopId);
+    const estimatedWaitMinutes = aheadCount * avgServiceTime;
+
+    res.json({
+      token,
+      aheadCount,
+      avgServiceTime,
+      estimatedWaitMinutes,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// POST: Join Queue
+router.post("/join", async (req, res) => {
+  try {
+    const { shopId, customerName, customerPhone } = req.body;
+
+    const lastToken = await QueueEntry.findOne({ shopId }).sort({
+      tokenNumber: -1,
+    });
+    const nextTokenNumber = lastToken ? lastToken.tokenNumber + 1 : 1;
+
+    const newEntry = new QueueEntry({
+      shopId,
+      customerName,
+      customerPhone,
+      tokenNumber: nextTokenNumber,
+    });
+
+    await newEntry.save();
+    await processQueueAlerts(shopId);
+
+    res.status(201).json(newEntry);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// PATCH: Update Token Status (e.g. served, serving, cancelled)
+router.patch("/status/:id", async (req, res) => {
+  try {
+    const { status } = req.body;
+    const updateData = { status };
+
+    if (status === "served") {
+      updateData.servedAt = new Date();
+    }
+
+    const updatedEntry = await QueueEntry.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true },
+    );
+    if (!updatedEntry)
+      return res.status(404).json({ message: "Entry not found" });
+
+    // Recheck alerts for remaining customers
+    await processQueueAlerts(updatedEntry.shopId);
+
+    res.json(updatedEntry);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+module.exports = router;
