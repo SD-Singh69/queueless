@@ -13,23 +13,44 @@ dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+const allowedOrigins =
+  process.env.CLIENT_URL?.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean) || [];
 const io = new SocketIO(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: allowedOrigins.length ? allowedOrigins : true,
     methods: ["GET", "POST", "PATCH", "DELETE"],
   },
 });
 
 app.set("io", io);
 
-io.on("connection", (socket) => {
+aio.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
   socket.on("joinShop", (shopId) => {
     socket.join(`shop:${shopId}`);
   });
 });
 
-app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:5173" }));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (
+        !origin ||
+        allowedOrigins.length === 0 ||
+        allowedOrigins.includes(origin) ||
+        allowedOrigins.includes("*")
+      ) {
+        return callback(null, true);
+      }
+      return callback(
+        new Error("CORS policy does not allow access from this origin."),
+      );
+    },
+    credentials: true,
+  }),
+);
 app.use(express.json());
 
 app.get("/api/health", (_req, res) => {
