@@ -1,7 +1,9 @@
-const express = require("express");
-const router = express.Router();
-const QueueEntry = require("../models/QueueEntry");
-const { sendSMSNotification } = require("../utils/notifications");
+import express from "express";
+import mongoose from "mongoose";
+import cors from "cors";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 // Helper: Calculate average service duration in minutes based on last 20 served tokens
 async function calculateAverageServiceTime(shopId) {
