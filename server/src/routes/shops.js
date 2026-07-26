@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import { body, validationResult } from 'express-validator';
+import Shop from '../models/Shop.js';
+import QueueEntry from '../models/QueueEntry.js';
+import { requireAuth, allow } from '../middleware/auth.js';
+const router = Router();
+router.get('/', async (req,res,next) => { try { const query = req.query.q ? { name: new RegExp(req.query.q, 'i') } : {}; res.json({ shops: await Shop.find(query).populate('owner','name').sort('-createdAt') }); } catch(e){ next(e); } });
+router.post('/', requireAuth, allow('owner'), [body('name').trim().isLength({min:2}), body('category').trim().notEmpty(), body('averageServiceMinutes').optional().isInt({min:1,max:120})], async (req,res,next) => { try { const errors=validationResult(req); if(!errors.isEmpty()) return res.status(422).json({message:'Please complete all required shop details'}); const shop=await Shop.create({...req.body,owner:req.user._id}); res.status(201).json({shop}); } catch(e){next(e)} });
+router.get('/mine', requireAuth, allow('owner'), async (req,res,next)=>{try{res.json({shops:await Shop.find({owner:req.user._id})})}catch(e){next(e)}});
+router.get('/:id/queue', async(req,res,next)=>{try{const entries=await QueueEntry.find({shop:req.params.id,status:{$in:['waiting','serving']}}).populate('customer','name').sort('token');res.json({entries})}catch(e){next(e)}});
+export default router;
