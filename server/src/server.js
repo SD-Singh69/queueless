@@ -53,7 +53,7 @@ app.use((err, req, res, _next) => {
 io.on("connection", (socket) =>
   socket.on("shop:watch", (shopId) => socket.join(`shop:${shopId}`)),
 );
-const port = process.env.PORT || 5001;
+const port = process.env.PORT || 5000;
 httpServer.listen(port, () => console.log(`QueueLess API on :${port}`));
 if (!process.env.MONGODB_URI)
   console.warn(
