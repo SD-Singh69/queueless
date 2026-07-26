@@ -1,6 +1,6 @@
 import { Router } from "express";
 import QueueEntry from "../models/QueueEntry.js";
-import { sendSMSNotification } from "../utils/sms.js";
+// import { sendSMSNotification } from "../utils/sms.js";
 
 const router = Router();
 
@@ -67,10 +67,10 @@ async function processQueueAlerts(shopId) {
     if (position === 1 && !entry.notifiedTurn) {
 
       if (entry.customerPhone) {
-        await sendSMSNotification(
-          entry.customerPhone,
-          "QueueLess Update: You are next in line. Please move towards the counter."
-        );
+        // await sendSMSNotification(
+        //   entry.customerPhone,
+        //   "QueueLess Update: You are next in line. Please move towards the counter."
+        // );
       }
 
       entry.notifiedTurn = true;
