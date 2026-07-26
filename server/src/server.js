@@ -53,14 +53,26 @@ app.use((err, req, res, _next) => {
 io.on("connection", (socket) =>
   socket.on("shop:watch", (shopId) => socket.join(`shop:${shopId}`)),
 );
-const port = process.env.PORT || 5000;
-httpServer.listen(port, () => console.log(`QueueLess API on :${port}`));
-if (!process.env.MONGODB_URI)
-  console.warn(
-    "MONGODB_URI is not configured. API database routes will return 503.",
-  );
-else
-  mongoose
-    .connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 8000 })
-    .then(() => console.log("MongoDB connected"))
-    .catch((err) => console.error("MongoDB connection failed:", err.message));
+const PORT = process.env.PORT || 5000;
+
+async function startServer() {
+  try {
+    if (process.env.MONGODB_URI) {
+      await mongoose.connect(process.env.MONGODB_URI, {
+        serverSelectionTimeoutMS: 8000,
+      });
+      console.log("MongoDB connected");
+    } else {
+      console.warn("MONGODB_URI is not configured.");
+    }
+
+    httpServer.listen(PORT, "0.0.0.0", () => {
+      console.log(`QueueLess API running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error("Startup failed:", err);
+    process.exit(1);
+  }
+}
+
+startServer();
