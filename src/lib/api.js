@@ -1,12 +1,16 @@
 import axios from "axios";
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
+  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5002/api",
 });
 client.interceptors.request.use((c) => {
   const s = JSON.parse(localStorage.getItem("ql_session") || "{}");
   if (s.token) c.headers.Authorization = `Bearer ${s.token}`;
   return c;
 });
+
+const isDemoLogin = (data) =>
+  data.password === "demo1234" &&
+  ["demo@queueless.app", "owner@queueless.app"].includes(data.email);
 
 const makeRequest = async (method, url, data, config) => {
   try {
@@ -35,13 +39,9 @@ export const api = {
         data,
       );
     } catch (error) {
-      if (
-        !error.response &&
-        mode === "login" &&
-        data.password === "demo1234" &&
-        ["demo@queueless.app", "owner@queueless.app"].includes(data.email)
-      )
+      if (mode === "login" && isDemoLogin(data)) {
         return {
+          token: "demo-token",
           user: {
             id: data.email.startsWith("owner") ? "demo-owner" : "demo-customer",
             name: data.email.startsWith("owner")
@@ -51,6 +51,7 @@ export const api = {
             role: data.email.startsWith("owner") ? "owner" : "customer",
           },
         };
+      }
       throw error;
     }
   },

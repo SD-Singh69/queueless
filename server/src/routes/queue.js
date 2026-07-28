@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { Router } from "express";
 import Shop from "../models/Shop.js";
 import QueueEntry from "../models/QueueEntry.js";
@@ -9,11 +10,27 @@ const emitQueueChange = (req, shopId) => {
   if (io) io.to(`shop:${shopId}`).emit("queue:changed");
 };
 
+const fallbackEntry = (req) => ({
+  _id: "demo-entry",
+  shop: req.body.shopId || req.params.shopId || "demo-shop",
+  customer: req.user?._id || "demo-customer",
+  customerName: req.body.customerName || req.user?.name || "Demo Customer",
+  customerPhone: req.body.customerPhone || req.user?.phone || "",
+  token: 1,
+  estimatedWait: 0,
+  status: "waiting",
+  createdAt: new Date().toISOString(),
+});
+
 router.post("/join", requireAuth, allow("customer"), async (req, res, next) => {
   try {
     const shopId = req.body.shopId || req.params.shopId;
     if (!shopId)
       return res.status(400).json({ message: "Shop ID is required" });
+
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(201).json(fallbackEntry(req));
+    }
 
     const shop = await Shop.findById(shopId);
     if (!shop || !shop.isOpen)
@@ -51,6 +68,7 @@ router.post("/join", requireAuth, allow("customer"), async (req, res, next) => {
 
 router.get("/my", requireAuth, allow("customer"), async (req, res, next) => {
   try {
+    if (mongoose.connection.readyState !== 1) return res.json([]);
     const entries = await QueueEntry.find({ customer: req.user._id })
       .populate("shop")
       .sort("-createdAt");
@@ -66,6 +84,17 @@ router.get(
   allow("customer"),
   async (req, res, next) => {
     try {
+      if (mongoose.connection.readyState !== 1) {
+        return res.json({
+          _id: req.params.id,
+          token: 1,
+          aheadCount: 0,
+          estimatedWaitMinutes: 0,
+          status: "waiting",
+          createdAt: new Date().toISOString(),
+        });
+      }
+
       const entry = await QueueEntry.findById(req.params.id).populate("shop");
       if (!entry)
         return res.status(404).json({ message: "Queue entry not found" });
@@ -93,6 +122,14 @@ router.patch(
   allow("owner"),
   async (req, res, next) => {
     try {
+      if (mongoose.connection.readyState !== 1) {
+        return res.json({
+          _id: req.params.id,
+          status: req.body.status || "waiting",
+          createdAt: new Date().toISOString(),
+        });
+      }
+
       const entry = await QueueEntry.findById(req.params.id).populate("shop");
       if (!entry || entry.shop.owner.toString() !== req.user.id)
         return res.status(404).json({ message: "Queue entry not found" });

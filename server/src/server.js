@@ -26,7 +26,7 @@ const io = new SocketIO(httpServer, {
 
 app.set("io", io);
 
-aio.on("connection", (socket) => {
+io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
   socket.on("joinShop", (shopId) => {
     socket.join(`shop:${shopId}`);
@@ -65,14 +65,18 @@ app.use("/api/auth", authRoutes);
 app.use("/api/shops", shopRoutes);
 app.use("/api/queue", queueRoutes);
 
+const port = Number(process.env.PORT || 5000);
+
 mongoose
-  .connect(process.env.MONGODB_URI)
+  .connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
   .then(() => {
     console.log("MongoDB Connected");
-    httpServer.listen(process.env.PORT || 5000, () => {
-      console.log(`Server running on port ${process.env.PORT || 5000}`);
-    });
   })
   .catch((error) => {
-    console.log("MongoDB Error:", error);
+    console.log("MongoDB Error:", error.message);
+  })
+  .finally(() => {
+    httpServer.listen(port, () => {
+      console.log(`Server running on port ${port}`);
+    });
   });

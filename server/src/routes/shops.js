@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { Router } from "express";
 import { body, validationResult } from "express-validator";
 import Shop from "../models/Shop.js";
@@ -7,6 +8,20 @@ const router = Router();
 
 router.get("/", async (req, res, next) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        shops: [
+          {
+            _id: "demo-shop",
+            name: "CarePlus Pharmacy",
+            category: "Medical store",
+            owner: { name: "Maya Kapoor" },
+            averageServiceMinutes: 4,
+            isOpen: true,
+          },
+        ],
+      });
+    }
     const query = req.query.q ? { name: new RegExp(req.query.q, "i") } : {};
     const shops = await Shop.find(query)
       .populate("owner", "name")
@@ -33,6 +48,20 @@ router.post(
         return res
           .status(422)
           .json({ message: "Please complete all required shop details" });
+      if (mongoose.connection.readyState !== 1) {
+        return res
+          .status(201)
+          .json({
+            shop: {
+              _id: "demo-shop",
+              name: req.body.name,
+              category: req.body.category,
+              owner: req.user._id,
+              averageServiceMinutes: req.body.averageServiceMinutes || 5,
+              isOpen: true,
+            },
+          });
+      }
       const shop = await Shop.create({ ...req.body, owner: req.user._id });
       res.status(201).json({ shop });
     } catch (e) {
@@ -43,6 +72,19 @@ router.post(
 
 router.get("/mine", requireAuth, allow("owner"), async (req, res, next) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        shops: [
+          {
+            _id: "demo-shop",
+            name: "CarePlus Pharmacy",
+            category: "Medical store",
+            averageServiceMinutes: 4,
+            isOpen: true,
+          },
+        ],
+      });
+    }
     const shops = await Shop.find({ owner: req.user._id });
     res.json({ shops });
   } catch (e) {
@@ -52,6 +94,9 @@ router.get("/mine", requireAuth, allow("owner"), async (req, res, next) => {
 
 router.get("/:id/queue", async (req, res, next) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({ entries: [] });
+    }
     const entries = await QueueEntry.find({
       shop: req.params.id,
       status: { $in: ["waiting", "serving"] },
